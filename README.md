@@ -12,6 +12,11 @@ Surya OCR. It does not import from or write to the existing `Pdf Extractor` or
 - Reviewable Word and Excel exports
 - Project-local virtual environment and model caches on H
 - Project-local llama.cpp CPU server on H (no Docker required)
+- The Surya recognition configuration remains unchanged for accuracy
+- Native editable Microsoft Word equations for detected LaTeX math
+- Section-wise Excel sheets with exactly seven requested columns
+- Original coordinate-preserving JSON remains the source of truth
+- Elapsed OCR status every 30 seconds without changing inference batching
 
 ## Commands
 
@@ -22,7 +27,18 @@ Surya OCR. It does not import from or write to the existing `Pdf Extractor` or
 ```
 
 Page indexes are zero-based and `--end` is inclusive. Omit both page arguments
-to process the complete PDF.
+to process the complete PDF. Partial runs use a page-range suffix in their output
+filename so they cannot overwrite a completed full-document extraction.
+
+The Excel question sheets use exactly these columns:
+
+```text
+Q.No | Question (English) | Question (हिंदी) | Option A | Option B | Option C | Option D
+```
+
+The exporter never edits the Surya JSON. Word equations are generated with free,
+open-source local Python converters. When an equation cannot be converted,
+its original recognized text is retained instead of being guessed or discarded.
 
 The first run downloads Surya model weights into `.cache` inside this project.
 Later runs can use those local weights.
