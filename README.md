@@ -17,6 +17,7 @@ Surya OCR. It does not import from or write to the existing `Pdf Extractor` or
 - Section-wise Excel sheets with exactly seven requested columns
 - Original coordinate-preserving JSON remains the source of truth
 - Elapsed OCR status every 30 seconds without changing inference batching
+- Exact per-page progress, atomic page cache, safe resume, and isolated failures
 
 ## Commands
 
@@ -29,6 +30,16 @@ Surya OCR. It does not import from or write to the existing `Pdf Extractor` or
 Page indexes are zero-based and `--end` is inclusive. Omit both page arguments
 to process the complete PDF. Partial runs use a page-range suffix in their output
 filename so they cannot overwrite a completed full-document extraction.
+
+OCR pages are saved under `output/surya_pages` immediately. Running the same
+command resumes from the first missing page. The default request policy allows
+four minutes plus one backend retry, so one difficult page cannot hold the entire
+book indefinitely. A failed page is recorded and later pages continue. Retry a
+specific PDF page (example: displayed page 24, zero-based index 23) with:
+
+```powershell
+.\.venv\Scripts\python.exe run_surya.py ".\input\book.pdf" --start 23 --end 23 --request-timeout 600 --inference-retries 2
+```
 
 The Excel question sheets use exactly these columns:
 
