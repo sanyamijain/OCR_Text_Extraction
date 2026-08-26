@@ -4,6 +4,7 @@ import unittest
 
 from document_parser import parse_questions, split_options
 from excel_math import readable_math
+from word_math import MATH_ATOM
 
 
 class ParserTests(unittest.TestCase):
@@ -37,6 +38,10 @@ class ParserTests(unittest.TestCase):
         self.assertIn("p⁄q", value)
         self.assertIn("≠", value)
         self.assertIn("x²", value)
+
+    def test_adjacent_variable_powers_are_separate_math_atoms(self):
+        self.assertEqual(MATH_ATOM.findall("x^3y^2"), ["x^3", "y^2"])
+        self.assertEqual(MATH_ATOM.findall("x^2y^3"), ["x^2", "y^3"])
 
 
 if __name__ == "__main__":

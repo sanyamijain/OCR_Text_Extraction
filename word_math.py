@@ -15,7 +15,7 @@ MATH_ATOM = re.compile(
     r"\\sqrt(?:\[[^\]]+\])?\{[^{}]+\}|"
     r"\\overline\{[^{}]+\}|"
     r"\\(?:neq|leq|geq|times|div|pm|infty|alpha|beta|gamma|theta|pi)\b|"
-    r"[A-Za-z0-9.)]+\^\{?[-+A-Za-z0-9]+\}?|"
+    r"(?:\([^()]+\)|[A-Za-z0-9])(?:\^\{[-+A-Za-z0-9]+\}|\^[-+A-Za-z0-9])|"
     r"[A-Za-z]+_\{?[-+A-Za-z0-9]+\}?"
     r")"
 )

@@ -13,7 +13,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from document_parser import parse_questions, section_kind, text_of
+from document_parser import numbered_items, parse_questions, section_kind, text_of
 from excel_math import readable_math
 from word_math import WordMathRenderer
 
@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent
 SOURCE = ROOT / "output" / "surya"
 DESTINATION = ROOT / "output" / "documents"
 EVALUATION = ROOT / "evaluation"
-HEADERS = [
+MCQ_HEADERS = [
     "Q.No",
     "Question (English)",
     "Question (हिंदी)",
@@ -30,6 +30,7 @@ HEADERS = [
     "Option C",
     "Option D",
 ]
+ANSWER_HEADERS = ["Q.No", "Question (English)", "Question (हिंदी)", "Marks", "Answer"]
 
 
 def safe_sheet_name(name: str, existing: set[str]) -> str:
@@ -44,47 +45,157 @@ def safe_sheet_name(name: str, existing: set[str]) -> str:
     return candidate
 
 
-def style_sheet(ws) -> None:
+def style_header(ws, row_number: int, column_count: int) -> None:
     fill = PatternFill("solid", fgColor="1F4E78")
-    for cell in ws[1]:
+    for cell in ws[row_number][:column_count]:
         cell.font = Font(color="FFFFFF", bold=True)
         cell.fill = fill
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    widths = [9, 52, 52, 28, 28, 28, 28]
+
+
+def style_sheet(ws, header_row: int, widths: list[int]) -> None:
+    style_header(ws, header_row, len(widths))
     for index, width in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(index)].width = width
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = ws.dimensions
-    for row in ws.iter_rows(min_row=2):
+    ws.freeze_panes = f"A{header_row + 1}"
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(len(widths))}{ws.max_row}"
+    for row in ws.iter_rows(min_row=header_row + 1):
         for cell in row:
             cell.alignment = Alignment(vertical="top", wrap_text=True)
+    for row_number in range(header_row + 1, ws.max_row + 1):
+        ws.row_dimensions[row_number].height = 42
 
 
-def build_excel(questions, destination: Path) -> None:
+def cover_lines(pages: list[dict]) -> list[str]:
+    if not pages:
+        return []
+    values: list[str] = []
+    for block in sorted(pages[0].get("blocks", []), key=lambda b: b.get("reading_order", 0)):
+        if block.get("label") in {"PageHeader", "PageFooter", "Picture"} or block.get("skipped"):
+            continue
+        text = text_of(block.get("html", ""))
+        lower = text.lower()
+        if not text or "instructions for" in lower or "परीक्षार्थियों के लिये" in text:
+            break
+        if "booklet set code" in lower or "प्रश्न पुस्तिका सेट कोड" in text:
+            continue
+        values.append(readable_math(text))
+    return values
+
+
+def section_intros(pages: list[dict]) -> dict[str, list[str]]:
+    intros: dict[str, list[str]] = defaultdict(list)
+    current: str | None = None
+    started: set[str] = set()
+    pending_heading = ""
+    for page in pages:
+        for block in sorted(page.get("blocks", []), key=lambda b: b.get("reading_order", 0)):
+            if block.get("label") in {"PageHeader", "PageFooter", "Picture"} or block.get("skipped"):
+                continue
+            text = text_of(block.get("html", ""))
+            if not text:
+                continue
+            if block.get("label") == "SectionHeader":
+                detected = section_kind(text)
+                if detected:
+                    current = detected
+                    if pending_heading:
+                        intros[current].append(pending_heading)
+                    intros[current].append(text)
+                    pending_heading = ""
+                    continue
+                if "section" in text.lower() or "खण्ड" in text:
+                    pending_heading = text
+            if current and current not in started:
+                if numbered_items(text):
+                    started.add(current)
+                else:
+                    intros[current].append(readable_math(text))
+    return intros
+
+
+def add_intro(ws, lines: list[str], columns: int) -> int:
+    if not lines:
+        return 1
+    for index, line in enumerate(lines):
+        row = ws.max_row + 1
+        ws.cell(row, 1, line)
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=columns)
+        cell = ws.cell(row, 1)
+        cell.alignment = Alignment(horizontal="center" if index < 2 else "left", wrap_text=True)
+        if index < 2:
+            cell.font = Font(color="FFFFFF", bold=True)
+            cell.fill = PatternFill("solid", fgColor="1F4E78")
+    ws.append([None] * columns)
+    return ws.max_row + 1
+
+
+def add_cover_sheet(wb: Workbook, pages: list[dict]) -> None:
+    ws = wb.create_sheet("Cover Page")
+    ws.column_dimensions["A"].width = 22
+    for column in "BCDEFG":
+        ws.column_dimensions[column].width = 22
+    for index, line in enumerate(cover_lines(pages), 1):
+        ws.cell(index, 1, line)
+        ws.merge_cells(start_row=index, start_column=1, end_row=index, end_column=7)
+        cell = ws.cell(index, 1)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.font = Font(bold=index <= 6, size=12 if index <= 2 else 11, color="FFFFFF" if index <= 2 else "000000")
+        if index <= 2:
+            cell.fill = PatternFill("solid", fgColor="1F4E78")
+        ws.row_dimensions[index].height = 24
+
+
+def build_excel(pages: list[dict], questions, destination: Path) -> None:
     wb = Workbook()
     wb.remove(wb.active)
+    add_cover_sheet(wb, pages)
     grouped = defaultdict(list)
     for question in questions:
         grouped[question.section].append(question)
     names: set[str] = set()
+    intros = section_intros(pages)
     for section, items in grouped.items():
-        ws = wb.create_sheet(safe_sheet_name(section, names))
-        ws.append(HEADERS)
+        if "MCQ" in section:
+            display_name = f"Section A - MCQ ({len(items)} Ques)"
+            headers = MCQ_HEADERS
+            widths = [9, 44, 44, 25, 25, 25, 25]
+        elif "Short" in section:
+            display_name = f"Section B - Short Ans ({len(items)})"
+            headers = ANSWER_HEADERS
+            widths = [9, 46, 46, 10, 34]
+        else:
+            display_name = f"Section B - Long Ans ({len(items)})"
+            headers = ANSWER_HEADERS
+            widths = [9, 46, 46, 10, 34]
+        ws = wb.create_sheet(safe_sheet_name(display_name, names))
+        header_row = add_intro(ws, intros.get(section, []), len(headers))
+        ws.append(headers)
         for question in items:
-            ws.append([
-                question.number,
-                readable_math(question.english),
-                readable_math(question.hindi),
-                readable_math(question.option("A")),
-                readable_math(question.option("B")),
-                readable_math(question.option("C")),
-                readable_math(question.option("D")),
-            ])
-        style_sheet(ws)
-    if not wb.sheetnames:
+            if "MCQ" in section:
+                ws.append([
+                    question.number,
+                    readable_math(question.english),
+                    readable_math(question.hindi),
+                    readable_math(question.option("A")),
+                    readable_math(question.option("B")),
+                    readable_math(question.option("C")),
+                    readable_math(question.option("D")),
+                ])
+            else:
+                marks = 5 if "Long" in section else 2
+                ws.append([
+                    question.number,
+                    readable_math(question.english),
+                    readable_math(question.hindi),
+                    marks,
+                    "",
+                ])
+        style_sheet(ws, header_row, widths)
+    if len(wb.sheetnames) == 1:
         ws = wb.create_sheet("Questions")
-        ws.append(HEADERS)
-        style_sheet(ws)
+        ws.append(MCQ_HEADERS)
+        style_sheet(ws, 1, [9, 44, 44, 25, 25, 25, 25])
     wb.save(destination)
 
 
@@ -154,22 +265,29 @@ def build_word(pages: list[dict], title: str, destination: Path) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Create structured Word and Excel documents from saved Surya JSON")
     parser.add_argument("json", nargs="?", type=Path, help="Specific *_surya.json file; default exports all")
+    parser.add_argument(
+        "--destination",
+        type=Path,
+        default=DESTINATION,
+        help="Output directory (default: output/documents)",
+    )
     args = parser.parse_args()
     files = [args.json] if args.json else sorted(SOURCE.glob("*_surya.json"))
     files = [path.resolve() for path in files if path and path.exists()]
     if not files:
         print("No Surya JSON output found. Run run_surya.py first.")
         return 1
-    DESTINATION.mkdir(parents=True, exist_ok=True)
+    destination = args.destination.resolve()
+    destination.mkdir(parents=True, exist_ok=True)
     for index, source in enumerate(files, 1):
         print(f"[{index}/{len(files)}] Reading preserved OCR: {source.name}")
         pages = json.loads(source.read_text(encoding="utf-8"))
         stem = source.stem.removesuffix("_surya")
         questions = parse_questions(pages)
         print(f"[{index}/{len(files)}] Parsed {len(questions)} question records; creating Word...")
-        failures = build_word(pages, stem, DESTINATION / f"{stem}.docx")
+        failures = build_word(pages, stem, destination / f"{stem}.docx")
         print(f"[{index}/{len(files)}] Creating section-wise Excel...")
-        build_excel(questions, DESTINATION / f"{stem}.xlsx")
+        build_excel(pages, questions, destination / f"{stem}.xlsx")
         report = write_validation(questions, stem)
         review_count = sum(
             len(details["missing_english"])

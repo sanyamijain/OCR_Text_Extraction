@@ -33,8 +33,13 @@ filename so they cannot overwrite a completed full-document extraction.
 The Excel question sheets use exactly these columns:
 
 ```text
-Q.No | Question (English) | Question (हिंदी) | Option A | Option B | Option C | Option D
+MCQ: Q.No | Question (English) | Question (हिंदी) | Option A | Option B | Option C | Option D
+Short/Long: Q.No | Question (English) | Question (हिंदी) | Marks | Answer
 ```
+
+Each workbook includes a bilingual `Cover Page` and separate styled sheets for
+MCQ, short-answer, and long-answer sections. The `Answer` cells are intentionally
+blank for later entry.
 
 The exporter never edits the Surya JSON. Word equations are generated with free,
 open-source local Python converters. When an equation cannot be converted,
