@@ -1,0 +1,9 @@
+.venv/
+.cache/
+.pip-cache/
+tools/
+output/
+input/
+op/
+__pycache__/
+*.pyc

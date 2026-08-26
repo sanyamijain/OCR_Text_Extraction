@@ -1,0 +1,10 @@
+{
+  "metric_type": "structural completeness, not character accuracy",
+  "characters": 957,
+  "devanagari_characters": 215,
+  "question_number_candidates": 2,
+  "expected_questions": null,
+  "question_number_recall_percent": null,
+  "unicode_replacement_characters": 0,
+  "accuracy_note": "Manual ground truth is required for Hindi, English, formula, and option-pairing accuracy."
+}
