@@ -41,6 +41,18 @@ specific PDF page (example: displayed page 24, zero-based index 23) with:
 .\.venv\Scripts\python.exe run_surya.py ".\input\book.pdf" --start 23 --end 23 --request-timeout 600 --inference-retries 2
 ```
 
+Full-page output is capped at 4096 tokens and supervised by a five-minute hard
+watchdog. A failed or stalled page automatically switches to four overlapping
+regions. Each recovery region has its own 1024-token cap and three-minute
+watchdog; only a failing region is recursively subdivided. Successful regions
+are merged into the original page coordinate system and de-duplicated. Use
+`--split-pages 24` (comma-separated, one-based page numbers) only to send a
+known difficult page directly to adaptive recovery. Detailed timestamped
+heartbeats report loading, inference, backend restarts, subdivision, validation,
+and atomic cache writes. Guided layout grammar is disabled because the local
+llama.cpp build rejects it on some fallback pages; Surya's standard JSON parser
+continues to validate the unguided layout response.
+
 The Excel question sheets use exactly these columns:
 
 ```text
