@@ -7,6 +7,9 @@ from docx.text.paragraph import Paragraph
 from latex2mathml.converter import convert as latex_to_mathml
 from lxml import etree
 
+from excel_math import readable_math
+from structured_output import LogicalLine, MATH_MARKER
+
 MATH_NAMESPACE = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 OPTION_PREFIX = re.compile(r"^\s*(\([A-Da-d]\))\s*(.*)$", re.S)
 MATH_ATOM = re.compile(
@@ -37,7 +40,7 @@ class WordMathRenderer:
             paragraph._p.append(self._omml(latex.strip()))
             return True
         except Exception:
-            paragraph.add_run(latex)
+            paragraph.add_run(readable_math(latex))
             return False
 
     def add_mixed(self, paragraph: Paragraph, text: str) -> int:
@@ -62,3 +65,18 @@ class WordMathRenderer:
             paragraph.add_run(option.group(1) + " ").bold = True
             expression = option.group(2)
         return 0 if self.add_equation(paragraph, expression) else 1
+
+    def add_logical_line(self, paragraph: Paragraph, line: LogicalLine) -> int:
+        """Render preserved <math> fragments and readable surrounding text."""
+        failures = 0
+        cursor = 0
+        for match in MATH_MARKER.finditer(line.text):
+            if match.start() > cursor:
+                paragraph.add_run(readable_math(line.text[cursor : match.start()]))
+            latex = line.maths[int(match.group(1))]
+            if not self.add_equation(paragraph, latex):
+                failures += 1
+            cursor = match.end()
+        if cursor < len(line.text):
+            paragraph.add_run(readable_math(line.text[cursor:]))
+        return failures

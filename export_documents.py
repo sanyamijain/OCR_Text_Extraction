@@ -16,6 +16,7 @@ from openpyxl.utils import get_column_letter
 from document_parser import numbered_items, parse_questions, section_kind, text_of
 from excel_math import readable_math
 from word_math import WordMathRenderer
+from structured_output import MATH_MARKER, html_logical_lines
 
 ROOT = Path(__file__).resolve().parent
 SOURCE = ROOT / "output" / "surya"
@@ -241,7 +242,8 @@ def build_word(pages: list[dict], title: str, destination: Path) -> int:
     renderer = WordMathRenderer()
     failures = 0
     last_section = ""
-    for page in pages:
+    for page_index, page in enumerate(pages):
+        duplicate_pool: set[str] = set()
         blocks = sorted(page.get("blocks", []), key=lambda b: b.get("reading_order", 0))
         for block in blocks:
             if block.get("skipped") or block.get("label") in {"PageHeader", "PageFooter", "Picture"}:
@@ -254,10 +256,39 @@ def build_word(pages: list[dict], title: str, destination: Path) -> int:
                 doc.add_heading(text, level=1)
                 last_section = detected_section
                 continue
-            paragraph = doc.add_paragraph()
-            failures += renderer.add_block(paragraph, text, block.get("label") == "Equation")
-            for run in paragraph.runs:
-                run.font.size = Pt(10.5)
+            if block.get("label") == "SectionHeader":
+                doc.add_heading(readable_math(text), level=2)
+                continue
+            logical_lines = html_logical_lines(block.get("html", ""), block.get("label", ""))
+            normalized = [
+                re.sub(r"\s+", " ", MATH_MARKER.sub("<math>", line.text)).strip().casefold()
+                for line in logical_lines
+            ]
+            emitted = 0
+            for line, key in zip(logical_lines, normalized):
+                if len(logical_lines) == 1 and key and key in duplicate_pool:
+                    duplicate_pool.remove(key)
+                    continue
+                if re.match(r"^\d{1,3}\.\s", line.text) and key not in duplicate_pool:
+                    duplicate_pool.clear()
+                paragraph = doc.add_paragraph()
+                failures += renderer.add_logical_line(paragraph, line)
+                paragraph.paragraph_format.space_after = Pt(2)
+                if re.match(r"^\([A-D]\)\s", line.text):
+                    paragraph.paragraph_format.left_indent = Inches(0.25)
+                elif re.match(r"^(?:i|ii|iii|iv|v|vi|vii|viii|ix|x)\)\s", line.text, re.I):
+                    paragraph.paragraph_format.left_indent = Inches(0.3)
+                elif re.match(r"^\d{1,3}\.\s", line.text):
+                    paragraph.paragraph_format.space_before = Pt(5)
+                elif line.text.strip() in {"2", "5"}:
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                for run in paragraph.runs:
+                    run.font.size = Pt(10.5)
+                emitted += 1
+            if len(logical_lines) > 1 and emitted:
+                duplicate_pool = {key for key in normalized if key}
+        if page_index < len(pages) - 1:
+            doc.add_page_break()
     doc.save(destination)
     return failures
 

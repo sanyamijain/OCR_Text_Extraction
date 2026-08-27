@@ -12,11 +12,47 @@ NUMBERED_ITEM = re.compile(r"(?:^|\s)(\d{1,3})\.\s+")
 
 
 def text_of(html: str) -> str:
-    return BeautifulSoup(html or "", "html.parser").get_text(" ", strip=True)
+    soup = BeautifulSoup(html or "", "html.parser")
+    ordered = soup.find(["ol", "ul"])
+    if not ordered:
+        return soup.get_text(" ", strip=True)
+
+    roman = ("i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x")
+
+    def render_list(container) -> list[str]:
+        rendered: list[str] = []
+        list_type = (container.get("type") or "").lower()
+        for index, item in enumerate(container.find_all("li", recursive=False), 1):
+            clone = BeautifulSoup(str(item), "html.parser").find("li")
+            nested = item.find(["ol", "ul"], recursive=False)
+            for child in clone.find_all(["ol", "ul"], recursive=False):
+                child.decompose()
+            value = clone.get_text(" ", strip=True)
+            if list_type == "i":
+                marker = roman[index - 1] if index <= len(roman) else str(index)
+                value = f"{marker}) {value}"
+            rendered.append(value)
+            if nested:
+                rendered.extend(render_list(nested))
+        return rendered
+
+    prefix_parts = []
+    for node in soup.find_all(["ol", "ul"], recursive=False):
+        prefix_parts.extend(render_list(node))
+    return "\n".join(prefix_parts).strip()
 
 
 def has_hindi(text: str) -> bool:
     return bool(DEVANAGARI.search(text or ""))
+
+
+def append_text(existing: str, value: str) -> str:
+    if not existing:
+        return value.strip()
+    if not value:
+        return existing.strip()
+    separator = "\n" if "\n" in existing or "\n" in value else " "
+    return f"{existing.strip()}{separator}{value.strip()}"
 
 
 def split_options(text: str) -> tuple[str, dict[str, str]]:
@@ -99,7 +135,9 @@ def parse_questions(pages: list[dict]) -> list[Question]:
 
     def finish() -> None:
         nonlocal current, expecting_english
-        if current and (current.hindi or current.english):
+        if current and (
+            current.hindi or current.english or current.hindi_options or current.english_options
+        ):
             questions.append(current)
         current = None
         expecting_english = False
@@ -119,11 +157,34 @@ def parse_questions(pages: list[dict]) -> list[Question]:
                 finish()
                 section = detected
                 continue
+            if label == "SectionHeader":
+                # Subject/part headings belong to document structure, never to
+                # the preceding question body.
+                continue
             if section is None:
+                continue
+            if text.lower().lstrip().startswith(("direction", "instruction")):
+                continue
+            if re.fullmatch(r"\[?\s*\d{3}\s*\]?", text):
                 continue
 
             items = numbered_items(text)
             if items:
+                first_item = NUMBERED_ITEM.search(text)
+                leading = text[: first_item.start()].strip() if first_item else ""
+                if current and leading:
+                    lead_prefix, lead_options = split_options(leading)
+                    lead_hindi = has_hindi(lead_prefix or leading)
+                    if lead_options:
+                        if lead_hindi:
+                            current.hindi_options.update(lead_options)
+                        else:
+                            current.english_options.update(lead_options)
+                    if lead_prefix:
+                        if lead_hindi:
+                            current.hindi = append_text(current.hindi, lead_prefix)
+                        else:
+                            current.english = append_text(current.english, lead_prefix)
                 for candidate_number, body in items:
                     pair = descriptive_pair(body, section)
                     if pair:
@@ -133,7 +194,7 @@ def parse_questions(pages: list[dict]) -> list[Question]:
                         continue
                     if current and candidate_number == current.number and not has_hindi(body):
                         prefix, options = split_options(body)
-                        current.english = " ".join(filter(None, [current.english, prefix])).strip()
+                        current.english = append_text(current.english, prefix)
                         current.english_options.update(options)
                         expecting_english = False
                         continue
@@ -155,7 +216,7 @@ def parse_questions(pages: list[dict]) -> list[Question]:
                 body = question_match.group(2).strip()
                 if current and candidate_number == current.number and not has_hindi(body):
                     prefix, options = split_options(body)
-                    current.english = " ".join(filter(None, [current.english, prefix])).strip()
+                    current.english = append_text(current.english, prefix)
                     current.english_options.update(options)
                     expecting_english = False
                     continue
@@ -174,6 +235,9 @@ def parse_questions(pages: list[dict]) -> list[Question]:
             if current is None:
                 continue
 
+            if text.strip() in {"2", "5", "A", "B", "C", "D"}:
+                continue
+
             prefix, options = split_options(text)
             language_is_hindi = has_hindi(prefix or text)
             if options:
@@ -183,21 +247,46 @@ def parse_questions(pages: list[dict]) -> list[Question]:
                     current.english_options.update(options)
                 if prefix:
                     if language_is_hindi:
-                        current.hindi = " ".join(filter(None, [current.hindi, prefix])).strip()
+                        current.hindi = append_text(current.hindi, prefix)
                     else:
-                        current.english = " ".join(filter(None, [current.english, prefix])).strip()
+                        current.english = append_text(current.english, prefix)
                 continue
 
             if language_is_hindi and not current.hindi:
                 current.hindi = text
                 expecting_english = True
             elif not language_is_hindi and (expecting_english or not current.english):
-                current.english = " ".join(filter(None, [current.english, text])).strip()
+                current.english = append_text(current.english, text)
                 expecting_english = False
             elif language_is_hindi:
-                current.hindi = " ".join(filter(None, [current.hindi, text])).strip()
+                current.hindi = append_text(current.hindi, text)
             else:
-                current.english = " ".join(filter(None, [current.english, text])).strip()
+                current.english = append_text(current.english, text)
 
     finish()
-    return questions
+    consolidated: list[Question] = []
+    by_key: dict[tuple[str, int], Question] = {}
+
+    def better(old: str, new: str) -> str:
+        if not old:
+            return new
+        if not new or new in old:
+            return old
+        if old in new:
+            return new
+        return new if len(new) > len(old) else old
+
+    for question in questions:
+        key = (question.section, question.number)
+        existing = by_key.get(key)
+        if existing is None:
+            by_key[key] = question
+            consolidated.append(question)
+            continue
+        existing.english = better(existing.english, question.english)
+        existing.hindi = better(existing.hindi, question.hindi)
+        for letter, value in question.english_options.items():
+            existing.english_options[letter] = better(existing.english_options.get(letter, ""), value)
+        for letter, value in question.hindi_options.items():
+            existing.hindi_options[letter] = better(existing.hindi_options.get(letter, ""), value)
+    return consolidated
