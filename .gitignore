@@ -5,5 +5,7 @@ tools/
 output/
 input/
 op/
+evaluation/*_structure.json
 __pycache__/
 *.pyc
+*.bak
