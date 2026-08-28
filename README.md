@@ -70,3 +70,12 @@ its original recognized text is retained instead of being guessed or discarded.
 
 The first run downloads Surya model weights into `.cache` inside this project.
 Later runs can use those local weights.
+# Surya OCR same-Wi-Fi UI
+
+Start the purple-and-orange Surya UI on port 8502:
+
+```powershell
+.\start_surya_lan_ui.ps1
+```
+
+Share the complete tokenized URL printed by the terminal only with a teammate on the same trusted Wi-Fi. The UI queues one PDF at a time, displays Surya page/recovery progress, resumes from the existing page cache, exports only that job to Word and Excel, and stores downloads under `runtime/lan_jobs`.

@@ -9,3 +9,4 @@ evaluation/*_structure.json
 __pycache__/
 *.pyc
 *.bak
+runtime/lan_jobs/
