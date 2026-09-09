@@ -72,6 +72,8 @@ The first run downloads Surya model weights into `.cache` inside this project.
 Later runs can use those local weights.
 # Surya OCR same-Wi-Fi UI
 
+The project has been organized so all production implementation is under `code`, operational scripts are under `scripts`, the required local inference runtime is under `tools/llama.cpp`, and recoverable unused material is under `trash`. See [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) for the complete map. Existing root commands remain compatible.
+
 Start the purple-and-orange Surya UI on port 8502:
 
 ```powershell
