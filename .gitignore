@@ -2,6 +2,7 @@
 .cache/
 .pip-cache/
 tools/
+trash/
 output/
 input/
 op/
